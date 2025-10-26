@@ -80,23 +80,39 @@ public class Main {
                 System.out.println(currentDir.getAbsolutePath());
             }
 
-            // Handle 'cd' (absolute & relative paths)
+            // Handle 'cd' (absolute, relative, ~)
             else if (command.equals("cd")) {
                 if (parts.length > 1) {
-                    File targetDir = new File(parts[1]);
-                    if (!targetDir.isAbsolute()) {
-                        targetDir = new File(currentDir, parts[1]); // resolve relative to currentDir
-                    }
-                    if (targetDir.exists() && targetDir.isDirectory()) {
-                        try {
-                            currentDir = targetDir.getCanonicalFile(); // normalize path (./, ../)
-                            System.setProperty("user.dir", currentDir.getAbsolutePath());
-                        } catch (IOException e) {
-                            System.out.println("cd: " + parts[1] + ": Error resolving path");
+                    String target = parts[1];
+                    File targetDir;
+
+                    // Handle ~ as home directory
+                    if (target.equals("~")) {
+                        String home = System.getenv("HOME");
+                        if (home != null && !home.isEmpty()) {
+                            targetDir = new File(home);
+                        } else {
+                            System.out.println("cd: HOME not set");
+                            continue;
                         }
                     } else {
-                        System.out.println("cd: " + parts[1] + ": No such file or directory");
+                        targetDir = new File(target);
+                        if (!targetDir.isAbsolute()) {
+                            targetDir = new File(currentDir, target);
+                        }
                     }
+
+                    if (targetDir.exists() && targetDir.isDirectory()) {
+                        try {
+                            currentDir = targetDir.getCanonicalFile();
+                            System.setProperty("user.dir", currentDir.getAbsolutePath());
+                        } catch (IOException e) {
+                            System.out.println("cd: " + target + ": Error resolving path");
+                        }
+                    } else {
+                        System.out.println("cd: " + target + ": No such file or directory");
+                    }
+
                 } else {
                     System.out.println("cd: missing argument");
                 }
