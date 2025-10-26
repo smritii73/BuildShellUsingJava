@@ -1,7 +1,10 @@
+package main.java;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.HashSet;
 import java.util.Scanner;
 import java.util.Set;
-import java.util.HashSet;
-import java.io.File;
 
 public class Main {
     public static void main(String[] args) {
@@ -44,12 +47,9 @@ public class Main {
             else if (command.equals("type")) {
                 if (parts.length > 1) {
                     String cmdToCheck = parts[1];
-
-                    // Check builtins first
                     if (builtins.contains(cmdToCheck)) {
                         System.out.println(cmdToCheck + " is a shell builtin");
                     } else {
-                        // Search PATH
                         String pathEnv = System.getenv("PATH");
                         boolean found = false;
                         if (pathEnv != null && !pathEnv.isEmpty()) {
@@ -72,9 +72,33 @@ public class Main {
                 }
             }
 
-            // Unrecognized command
+            // Handle external programs
             else {
-                System.out.println(input + ": command not found");
+                String pathEnv = System.getenv("PATH");
+                boolean found = false;
+                if (pathEnv != null && !pathEnv.isEmpty()) {
+                    String[] dirs = pathEnv.split(File.pathSeparator);
+                    for (String dir : dirs) {
+                        File file = new File(dir, command);
+                        if (file.exists() && file.canExecute()) {
+                            // Build argument list for ProcessBuilder
+                            String[] cmdWithArgs = parts; // parts already includes program + args
+                            ProcessBuilder pb = new ProcessBuilder(cmdWithArgs);
+                            pb.inheritIO(); // Redirect subprocess stdout/stderr to our shell
+                            try {
+                                Process p = pb.start();
+                                p.waitFor(); // Wait for process to finish
+                            } catch (IOException | InterruptedException e) {
+                                System.out.println("Error executing command: " + e.getMessage());
+                            }
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found) {
+                    System.out.println(command + ": command not found");
+                }
             }
         }
     }
