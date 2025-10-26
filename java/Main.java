@@ -17,7 +17,7 @@ public class Main {
         builtins.add("exit");
         builtins.add("type");
         builtins.add("pwd");
-        builtins.add("cd"); // Add cd to builtins
+        builtins.add("cd");
 
         while (true) {
             System.out.print("$ ");
@@ -80,15 +80,20 @@ public class Main {
                 System.out.println(currentDir.getAbsolutePath());
             }
 
-            // Handle 'cd' (absolute paths)
+            // Handle 'cd' (absolute & relative paths)
             else if (command.equals("cd")) {
                 if (parts.length > 1) {
                     File targetDir = new File(parts[1]);
                     if (!targetDir.isAbsolute()) {
-                        System.out.println("cd: " + parts[1] + ": No such file or directory");
-                    } else if (targetDir.exists() && targetDir.isDirectory()) {
-                        currentDir = targetDir;
-                        System.setProperty("user.dir", currentDir.getAbsolutePath());
+                        targetDir = new File(currentDir, parts[1]); // resolve relative to currentDir
+                    }
+                    if (targetDir.exists() && targetDir.isDirectory()) {
+                        try {
+                            currentDir = targetDir.getCanonicalFile(); // normalize path (./, ../)
+                            System.setProperty("user.dir", currentDir.getAbsolutePath());
+                        } catch (IOException e) {
+                            System.out.println("cd: " + parts[1] + ": Error resolving path");
+                        }
                     } else {
                         System.out.println("cd: " + parts[1] + ": No such file or directory");
                     }
@@ -108,7 +113,7 @@ public class Main {
                         if (file.exists() && file.canExecute()) {
                             String[] cmdWithArgs = parts;
                             ProcessBuilder pb = new ProcessBuilder(cmdWithArgs);
-                            pb.directory(currentDir); // Set current working dir for external program
+                            pb.directory(currentDir);
                             pb.inheritIO();
                             try {
                                 Process p = pb.start();
