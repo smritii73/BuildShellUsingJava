@@ -8,12 +8,16 @@ public class Main {
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
 
+        // Track current working directory
+        File currentDir = new File(System.getProperty("user.dir"));
+
         // Define builtins
         Set<String> builtins = new HashSet<>();
         builtins.add("echo");
         builtins.add("exit");
         builtins.add("type");
         builtins.add("pwd");
+        builtins.add("cd"); // Add cd to builtins
 
         while (true) {
             System.out.print("$ ");
@@ -70,9 +74,29 @@ public class Main {
                     System.out.println("type: missing argument");
                 }
             }
+
+            // Handle 'pwd'
             else if (command.equals("pwd")) {
-    System.out.println(System.getProperty("user.dir"));
-}
+                System.out.println(currentDir.getAbsolutePath());
+            }
+
+            // Handle 'cd' (absolute paths)
+            else if (command.equals("cd")) {
+                if (parts.length > 1) {
+                    File targetDir = new File(parts[1]);
+                    if (!targetDir.isAbsolute()) {
+                        System.out.println("cd: " + parts[1] + ": No such file or directory");
+                    } else if (targetDir.exists() && targetDir.isDirectory()) {
+                        currentDir = targetDir;
+                        System.setProperty("user.dir", currentDir.getAbsolutePath());
+                    } else {
+                        System.out.println("cd: " + parts[1] + ": No such file or directory");
+                    }
+                } else {
+                    System.out.println("cd: missing argument");
+                }
+            }
+
             // Handle external programs
             else {
                 String pathEnv = System.getenv("PATH");
@@ -82,13 +106,13 @@ public class Main {
                     for (String dir : dirs) {
                         File file = new File(dir, command);
                         if (file.exists() && file.canExecute()) {
-                            // Build argument list for ProcessBuilder
-                            String[] cmdWithArgs = parts; // parts already includes program + args
+                            String[] cmdWithArgs = parts;
                             ProcessBuilder pb = new ProcessBuilder(cmdWithArgs);
-                            pb.inheritIO(); // Redirect subprocess stdout/stderr to our shell
+                            pb.directory(currentDir); // Set current working dir for external program
+                            pb.inheritIO();
                             try {
                                 Process p = pb.start();
-                                p.waitFor(); // Wait for process to finish
+                                p.waitFor();
                             } catch (IOException | InterruptedException e) {
                                 System.out.println("Error executing command: " + e.getMessage());
                             }
