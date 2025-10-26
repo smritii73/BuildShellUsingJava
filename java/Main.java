@@ -13,6 +13,7 @@ public class Main {
         builtins.add("echo");
         builtins.add("exit");
         builtins.add("type");
+        builtins.add("pwd");
 
         while (true) {
             System.out.print("$ ");
@@ -69,7 +70,9 @@ public class Main {
                     System.out.println("type: missing argument");
                 }
             }
-
+            else if (command.equals("pwd")) {
+    System.out.println(System.getProperty("user.dir"));
+}
             // Handle external programs
             else {
                 String pathEnv = System.getenv("PATH");
