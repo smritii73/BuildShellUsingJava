@@ -31,6 +31,8 @@ public class Main {
             String input = scanner.nextLine().trim();
             if (input.isEmpty()) continue;
 
+            // Tokenize input, handling single and double quotes
+            // Tokenize input, handling single quotes
             // Check for pipeline
             if (input.contains(" | ")) {
                 executePipeline(input);
@@ -336,9 +338,13 @@ public class Main {
         }
     }
 
+    // Parse input with single and double quote support
+    // Parse input with single-quote support
     private static List<String> parseInput(String input) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
         boolean inSingle = false;
         boolean inDouble = false;
         boolean escape = false;
@@ -346,6 +352,20 @@ public class Main {
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
+            if (c == '\'' && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+                continue;
+            }
+
+            if (c == '\"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+                continue;
+            }
+
+            if (Character.isWhitespace(c) && !inSingleQuote && !inDoubleQuote) {
+            if (c == '\'') {
+                inSingleQuote = !inSingleQuote;
+                continue; // skip the quote itself
             if (escape) {
                 if (inSingle) {
                     current.append('\\').append(c);
@@ -528,6 +548,7 @@ public class Main {
     }
 }
 
+// git commit -m "Implement single-quote support for echo and arguments"
 // git add .
 // git commit -m "Add pipeline support for shell commands"
 // git push origin master
