@@ -25,6 +25,7 @@ public class Main {
             if (input.isEmpty()) continue;
 
             // Tokenize input, handling single and double quotes
+            // Tokenize input, handling single quotes
             List<String> parts = parseInput(input);
             if (parts.isEmpty()) continue;
 
@@ -151,6 +152,7 @@ public class Main {
     }
 
     // Parse input with single and double quote support
+    // Parse input with single-quote support
     private static List<String> parseInput(String input) {
         List<String> tokens = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -171,6 +173,12 @@ public class Main {
             }
 
             if (Character.isWhitespace(c) && !inSingleQuote && !inDoubleQuote) {
+            if (c == '\'') {
+                inSingleQuote = !inSingleQuote;
+                continue; // skip the quote itself
+            }
+
+            if (Character.isWhitespace(c) && !inSingleQuote) {
                 if (current.length() > 0) {
                     tokens.add(current.toString());
                     current.setLength(0);
@@ -188,6 +196,5 @@ public class Main {
     }
 }
 
-// git add .
-// git commit -m "Implement double-quote support for echo and arguments"
+// git commit -m "Implement single-quote support for echo and arguments"
 // git push origin master
