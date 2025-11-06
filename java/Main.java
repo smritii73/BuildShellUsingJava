@@ -31,6 +31,12 @@ public class Main {
             String input = scanner.nextLine().trim();
             if (input.isEmpty()) continue;
 
+            // Check for pipeline
+            if (input.contains(" | ")) {
+                executePipeline(input);
+                continue;
+            }
+
             List<String> parts = parseInput(input);
             if (parts.isEmpty()) continue;
 
@@ -53,6 +59,199 @@ public class Main {
                 }
             }
         }
+        scanner.close();
+    }
+
+    private static void executePipeline(String input) throws IOException, InterruptedException {
+        // Split by pipe operator
+        String[] commands = input.split("\\s*\\|\\s*");
+        
+        List<List<String>> parsedCommands = new ArrayList<>();
+        for (String cmd : commands) {
+            List<String> parsed = parseInput(cmd.trim());
+            if (!parsed.isEmpty()) {
+                parsedCommands.add(parsed);
+            }
+        }
+        
+        if (parsedCommands.size() < 2) {
+            System.out.println("Pipeline requires at least 2 commands");
+            return;
+        }
+        
+        // Build pipeline with mixed built-ins and external commands
+        executeMixedPipeline(parsedCommands);
+    }
+    
+    private static void executeMixedPipeline(List<List<String>> commands) throws IOException, InterruptedException {
+        PipedOutputStream[] pipeOuts = new PipedOutputStream[commands.size() - 1];
+        PipedInputStream[] pipeIns = new PipedInputStream[commands.size() - 1];
+        
+        // Create pipes between commands
+        for (int i = 0; i < commands.size() - 1; i++) {
+            pipeOuts[i] = new PipedOutputStream();
+            pipeIns[i] = new PipedInputStream(pipeOuts[i], 65536);
+        }
+        
+        List<Thread> threads = new ArrayList<>();
+        List<Process> processes = new ArrayList<>();
+        
+        for (int i = 0; i < commands.size(); i++) {
+            List<String> cmd = commands.get(i);
+            String cmdName = cmd.get(0);
+            String[] args = cmd.subList(1, cmd.size()).toArray(new String[0]);
+            
+            InputStream cmdInput;
+            OutputStream cmdOutput;
+            
+            // Set input stream
+            if (i == 0) {
+                cmdInput = System.in;
+            } else {
+                cmdInput = pipeIns[i - 1];
+            }
+            
+            // Set output stream
+            if (i == commands.size() - 1) {
+                cmdOutput = System.out;
+            } else {
+                cmdOutput = pipeOuts[i];
+            }
+            
+            // Check if it's a built-in command
+            if (builtins.containsKey(cmdName)) {
+                final InputStream finalInput = cmdInput;
+                final OutputStream finalOutput = cmdOutput;
+                final int index = i;
+                
+                Thread builtinThread = new Thread(() -> {
+                    try {
+                        executeBuiltinInPipeline(cmdName, args, finalInput, finalOutput);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    } finally {
+                        // Close output stream if it's a pipe (not stdout)
+                        if (index < commands.size() - 1) {
+                            closeQuietly(finalOutput);
+                        }
+                    }
+                });
+                builtinThread.start();
+                threads.add(builtinThread);
+            } else {
+                // External command
+                ProcessBuilder pb = new ProcessBuilder(cmd);
+                pb.directory(currentDir);
+                
+                Process process = pb.start();
+                processes.add(process);
+                
+                // Connect input
+                if (i > 0) {
+                    final InputStream in = cmdInput;
+                    final OutputStream out = process.getOutputStream();
+                    Thread inputThread = new Thread(() -> {
+                        pipeData(in, out, true);
+                    });
+                    inputThread.start();
+                    threads.add(inputThread);
+                } else {
+                    closeQuietly(process.getOutputStream());
+            List<String> parts = parseInput(input);
+            if (parts.isEmpty()) continue;
+
+            String command = parts.get(0);
+            String[] arguments = parts.subList(1, parts.size()).toArray(new String[0]);
+
+            if (externals.containsKey(command)) {
+                switch (externals.getOrDefault(command, ShellType.NONE)) {
+                    case CAT -> cat(arguments);
+                    default -> nullCommand(parts);
+                }
+            } else {
+                switch (builtins.getOrDefault(command, ShellType.NONE)) {
+                    case EXIT -> exit = true;
+                    case ECHO -> echo(arguments);
+                    case TYPE -> type(arguments);
+                    case PWD -> pwd();
+                    case CD -> cd(arguments);
+                    default -> nullCommand(parts);
+                }
+                
+                // Connect output
+                if (i < commands.size() - 1) {
+                    final InputStream in = process.getInputStream();
+                    final OutputStream out = cmdOutput;
+                    Thread outputThread = new Thread(() -> {
+                        pipeData(in, out, true);
+                    });
+                    outputThread.start();
+                    threads.add(outputThread);
+                } else {
+                    Thread outputThread = new Thread(() -> {
+                        pipeData(process.getInputStream(), System.out, false);
+                    });
+                    outputThread.start();
+                    threads.add(outputThread);
+                }
+                
+                // Always pipe stderr to System.err
+                Thread errorThread = new Thread(() -> {
+                    pipeData(process.getErrorStream(), System.err, false);
+                });
+                errorThread.start();
+                threads.add(errorThread);
+            }
+        }
+        
+        // Wait for all threads to complete
+        for (Thread t : threads) {
+            t.join();
+        }
+        
+        // Wait for all processes to complete
+        for (Process p : processes) {
+            p.waitFor();
+        }
+    }
+    
+    private static void executeBuiltinInPipeline(String cmdName, String[] args, 
+                                                  InputStream input, OutputStream output) throws IOException {
+        PrintStream out = new PrintStream(output, true);
+        BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+        
+        switch (builtins.get(cmdName)) {
+            case ECHO -> {
+                if (args.length > 0) {
+                    out.println(String.join(" ", args));
+                } else {
+                    out.println();
+                }
+            }
+            case TYPE -> {
+                // Read and discard input from pipeline
+                while (reader.ready() && reader.readLine() != null) {
+                    // Consume input but don't use it
+                }
+                
+                if (args.length >= 1) {
+                    String cmdToCheck = args[0];
+                    if (builtins.containsKey(cmdToCheck)) {
+                        out.println(cmdToCheck + " is a shell builtin");
+                    } else {
+                        boolean found = false;
+                        for (String dir : DIRECTORIES) {
+                            File file = new File(dir, cmdToCheck);
+                            if (file.exists() && file.canExecute()) {
+                                out.println(cmdToCheck + " is " + file.getAbsolutePath());
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            out.println(cmdToCheck + ": not found");
+                        }
+                    }
         scanner.close();
     }
 
@@ -80,6 +279,103 @@ public class Main {
                 escape = false;
                 continue;
             }
+            case PWD -> {
+                out.println(currentDir.getAbsolutePath());
+            }
+            case CAT -> {
+                // If no args, read from stdin
+                if (args.length == 0) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        out.println(line);
+                    }
+                } else {
+                    for (String file : args) {
+                        try {
+                            Path filePath = Paths.get(file);
+                            String content = Files.readString(filePath);
+                            out.print(content);
+                        } catch (IOException e) {
+                            System.err.println("cat: " + file + ": No such file or directory");
+                        }
+                    }
+                }
+            }
+            default -> {
+                // Other built-ins that don't make sense in pipelines
+            }
+        }
+        
+        out.flush();
+    }
+    
+    private static void pipeData(InputStream in, OutputStream out, boolean closeOut) {
+        byte[] buffer = new byte[8192];
+        try {
+            int n;
+            while ((n = in.read(buffer)) != -1) {
+                out.write(buffer, 0, n);
+                out.flush();
+            }
+        } catch (IOException e) {
+            // Stream closed or error
+        } finally {
+            closeQuietly(in);
+            if (closeOut) {
+                closeQuietly(out);
+            }
+        }
+    }
+    
+    private static void closeQuietly(Closeable c) {
+        try {
+            if (c != null) {
+                c.close();
+            }
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static List<String> parseInput(String input) {
+        List<String> result = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingle = false;
+        boolean inDouble = false;
+        boolean escape = false;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (escape) {
+                if (inSingle) {
+                    current.append('\\').append(c);
+                } else if (inDouble) {
+                    switch (c) {
+                        case '$', '`', '"', '\\', '\n' -> current.append(c);
+                        default -> current.append('\\').append(c);
+                    }
+                } else {
+                    current.append(c);
+                }
+                escape = false;
+                continue;
+            }
+
+            if (c == '\\') {
+                escape = true;
+                continue;
+            }
+
+            if (c == '\'' && !inDouble) {
+                inSingle = !inSingle;
+                continue;
+            }
+
+            if (c == '"' && !inSingle) {
+                inDouble = !inDouble;
+                continue;
+            }
+
 
             if (c == '\\') {
                 escape = true;
@@ -233,5 +529,7 @@ public class Main {
 }
 
 // git add .
+// git commit -m "Add pipeline support for shell commands"
+// git push origin master
 // git commit -m "Fix shell parsing and implement builtins with correct quote/escape handling"
 // git push origin master 
