@@ -157,6 +157,25 @@ public class Main {
                     threads.add(inputThread);
                 } else {
                     closeQuietly(process.getOutputStream());
+            List<String> parts = parseInput(input);
+            if (parts.isEmpty()) continue;
+
+            String command = parts.get(0);
+            String[] arguments = parts.subList(1, parts.size()).toArray(new String[0]);
+
+            if (externals.containsKey(command)) {
+                switch (externals.getOrDefault(command, ShellType.NONE)) {
+                    case CAT -> cat(arguments);
+                    default -> nullCommand(parts);
+                }
+            } else {
+                switch (builtins.getOrDefault(command, ShellType.NONE)) {
+                    case EXIT -> exit = true;
+                    case ECHO -> echo(arguments);
+                    case TYPE -> type(arguments);
+                    case PWD -> pwd();
+                    case CD -> cd(arguments);
+                    default -> nullCommand(parts);
                 }
                 
                 // Connect output
@@ -233,7 +252,32 @@ public class Main {
                             out.println(cmdToCheck + ": not found");
                         }
                     }
+        scanner.close();
+    }
+
+    private static List<String> parseInput(String input) {
+        List<String> result = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingle = false;
+        boolean inDouble = false;
+        boolean escape = false;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (escape) {
+                if (inSingle) {
+                    current.append('\\').append(c);
+                } else if (inDouble) {
+                    switch (c) {
+                        case '$', '`', '"', '\\', '\n' -> current.append(c);
+                        default -> current.append('\\').append(c);
+                    }
+                } else {
+                    current.append(c);
                 }
+                escape = false;
+                continue;
             }
             case PWD -> {
                 out.println(currentDir.getAbsolutePath());
@@ -316,6 +360,22 @@ public class Main {
                 escape = false;
                 continue;
             }
+
+            if (c == '\\') {
+                escape = true;
+                continue;
+            }
+
+            if (c == '\'' && !inDouble) {
+                inSingle = !inSingle;
+                continue;
+            }
+
+            if (c == '"' && !inSingle) {
+                inDouble = !inDouble;
+                continue;
+            }
+
 
             if (c == '\\') {
                 escape = true;
@@ -429,6 +489,7 @@ public class Main {
             }
             
             try {
+                // Normalize the path to resolve . and .. components
                 Path normalizedPath = targetDir.toPath().toRealPath();
                 targetDir = normalizedPath.toFile();
             } catch (IOException e) {
@@ -470,3 +531,5 @@ public class Main {
 // git add .
 // git commit -m "Add pipeline support for shell commands"
 // git push origin master
+// git commit -m "Fix shell parsing and implement builtins with correct quote/escape handling"
+// git push origin master 
