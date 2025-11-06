@@ -1,187 +1,237 @@
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Scanner;
-import java.util.Set;
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
 
 public class Main {
-    public static void main(String[] args) {
+
+    enum ShellType {
+        TYPE, ECHO, EXIT, PWD, CD, CAT, NONE
+    }
+
+    private static final Map<String, ShellType> builtins =
+            Map.of(
+                    "type", ShellType.TYPE,
+                    "echo", ShellType.ECHO,
+                    "exit", ShellType.EXIT,
+                    "pwd", ShellType.PWD,
+                    "cd", ShellType.CD);
+    
+    private static final Map<String, ShellType> externals = Map.of("cat", ShellType.CAT);
+
+    private static final String PATH = System.getenv("PATH");
+    private static final String[] DIRECTORIES = PATH != null ? PATH.split(File.pathSeparator) : new String[0];
+    private static File currentDir = new File(System.getProperty("user.dir"));
+
+    public static void main(String[] args) throws Exception {
+        boolean exit = false;
         Scanner scanner = new Scanner(System.in);
-
-        File currentDir = new File(System.getProperty("user.dir"));
-
-        Set<String> builtins = new HashSet<>();
-        builtins.add("echo");
-        builtins.add("exit");
-        builtins.add("type");
-        builtins.add("pwd");
-        builtins.add("cd");
-
-        while (true) {
+        
+        while (!exit) {
             System.out.print("$ ");
             String input = scanner.nextLine().trim();
             if (input.isEmpty()) continue;
 
-            // Tokenize input, handling single quotes
             List<String> parts = parseInput(input);
             if (parts.isEmpty()) continue;
 
             String command = parts.get(0);
+            String[] arguments = parts.subList(1, parts.size()).toArray(new String[0]);
 
-            // exit
-            if (command.equals("exit")) {
-                int exitCode = 0;
-                if (parts.size() > 1) {
-                    try { exitCode = Integer.parseInt(parts.get(1)); } 
-                    catch (NumberFormatException e) { exitCode = 0; }
+            if (externals.containsKey(command)) {
+                switch (externals.getOrDefault(command, ShellType.NONE)) {
+                    case CAT -> cat(arguments);
+                    default -> nullCommand(parts);
                 }
-                System.exit(exitCode);
-            }
-
-            // echo
-            else if (command.equals("echo")) {
-                if (parts.size() > 1) {
-                    System.out.println(String.join(" ", parts.subList(1, parts.size())));
-                } else {
-                    System.out.println();
-                }
-            }
-
-            // type
-            else if (command.equals("type")) {
-                if (parts.size() > 1) {
-                    String cmdToCheck = parts.get(1);
-                    if (builtins.contains(cmdToCheck)) {
-                        System.out.println(cmdToCheck + " is a shell builtin");
-                    } else {
-                        String pathEnv = System.getenv("PATH");
-                        boolean found = false;
-                        if (pathEnv != null && !pathEnv.isEmpty()) {
-                            String[] dirs = pathEnv.split(File.pathSeparator);
-                            for (String dir : dirs) {
-                                File file = new File(dir, cmdToCheck);
-                                if (file.exists() && file.canExecute()) {
-                                    System.out.println(cmdToCheck + " is " + file.getAbsolutePath());
-                                    found = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!found) {
-                            System.out.println(cmdToCheck + ": not found");
-                        }
-                    }
-                } else {
-                    System.out.println("type: missing argument");
-                }
-            }
-
-            // pwd
-            else if (command.equals("pwd")) {
-                System.out.println(currentDir.getAbsolutePath());
-            }
-
-            // cd
-            else if (command.equals("cd")) {
-                if (parts.size() > 1) {
-                    String target = parts.get(1);
-                    File targetDir;
-
-                    if (target.equals("~")) {
-                        String home = System.getenv("HOME");
-                        if (home != null && !home.isEmpty()) {
-                            targetDir = new File(home);
-                        } else {
-                            System.out.println("cd: HOME not set");
-                            continue;
-                        }
-                    } else {
-                        targetDir = new File(target);
-                        if (!targetDir.isAbsolute()) {
-                            targetDir = new File(currentDir, target);
-                        }
-                    }
-
-                    if (targetDir.exists() && targetDir.isDirectory()) {
-                        try {
-                            currentDir = targetDir.getCanonicalFile();
-                            System.setProperty("user.dir", currentDir.getAbsolutePath());
-                        } catch (IOException e) {
-                            System.out.println("cd: " + target + ": Error resolving path");
-                        }
-                    } else {
-                        System.out.println("cd: " + target + ": No such file or directory");
-                    }
-
-                } else {
-                    System.out.println("cd: missing argument");
-                }
-            }
-
-            // external programs
-            else {
-                String pathEnv = System.getenv("PATH");
-                boolean found = false;
-                if (pathEnv != null && !pathEnv.isEmpty()) {
-                    String[] dirs = pathEnv.split(File.pathSeparator);
-                    for (String dir : dirs) {
-                        File file = new File(dir, command);
-                        if (file.exists() && file.canExecute()) {
-                            ProcessBuilder pb = new ProcessBuilder(parts);
-                            pb.directory(currentDir);
-                            pb.inheritIO();
-                            try {
-                                Process p = pb.start();
-                                p.waitFor();
-                            } catch (IOException | InterruptedException e) {
-                                System.out.println("Error executing command: " + e.getMessage());
-                            }
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-                if (!found) {
-                    System.out.println(command + ": command not found");
+            } else {
+                switch (builtins.getOrDefault(command, ShellType.NONE)) {
+                    case EXIT -> exit = true;
+                    case ECHO -> echo(arguments);
+                    case TYPE -> type(arguments);
+                    case PWD -> pwd();
+                    case CD -> cd(arguments);
+                    default -> nullCommand(parts);
                 }
             }
         }
+        scanner.close();
     }
 
-    // Parse input with single-quote support
     private static List<String> parseInput(String input) {
-        List<String> tokens = new ArrayList<>();
+        List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
-        boolean inSingleQuote = false;
+        boolean inSingle = false;
+        boolean inDouble = false;
+        boolean escape = false;
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            if (c == '\'') {
-                inSingleQuote = !inSingleQuote;
-                continue; // skip the quote itself
+            if (escape) {
+                if (inSingle) {
+                    current.append('\\').append(c);
+                } else if (inDouble) {
+                    switch (c) {
+                        case '$', '`', '"', '\\', '\n' -> current.append(c);
+                        default -> current.append('\\').append(c);
+                    }
+                } else {
+                    current.append(c);
+                }
+                escape = false;
+                continue;
             }
 
-            if (Character.isWhitespace(c) && !inSingleQuote) {
+            if (c == '\\') {
+                escape = true;
+                continue;
+            }
+
+            if (c == '\'' && !inDouble) {
+                inSingle = !inSingle;
+                continue;
+            }
+
+            if (c == '"' && !inSingle) {
+                inDouble = !inDouble;
+                continue;
+            }
+
+            if (Character.isWhitespace(c) && !inSingle && !inDouble) {
                 if (current.length() > 0) {
-                    tokens.add(current.toString());
+                    result.add(current.toString());
                     current.setLength(0);
                 }
-            } else {
-                current.append(c);
+                continue;
             }
+
+            current.append(c);
+        }
+
+        if (escape) {
+            current.append('\\');
         }
 
         if (current.length() > 0) {
-            tokens.add(current.toString());
+            result.add(current.toString());
         }
 
-        return tokens;
+        return result;
+    }
+
+    private static String typeText(String command) {
+        return command + " is a shell builtin";
+    }
+
+    private static String notFoundText(String command) {
+        return command + ": not found";
+    }
+
+    private static String commandNotFoundText(String command) {
+        return command + ": command not found";
+    }
+
+    private static void type(String[] command) {
+        if (command.length >= 1) {
+            String cmdToCheck = command[0];
+            if (builtins.containsKey(cmdToCheck)) {
+                System.out.println(typeText(cmdToCheck));
+            } else {
+                boolean found = false;
+                for (String dir : DIRECTORIES) {
+                    File file = new File(dir, cmdToCheck);
+                    if (file.exists() && file.canExecute()) {
+                        System.out.println(cmdToCheck + " is " + file.getAbsolutePath());
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    System.out.println(notFoundText(cmdToCheck));
+                }
+            }
+        } else {
+            System.out.println("type: missing argument");
+        }
+    }
+
+    private static void nullCommand(List<String> parts) throws IOException {
+        String command = parts.get(0);
+        for (String dir : DIRECTORIES) {
+            File file = new File(dir, command);
+            if (file.exists() && file.canExecute()) {
+                ProcessBuilder pb = new ProcessBuilder(parts);
+                pb.directory(currentDir);
+                pb.inheritIO();
+                try {
+                    Process program = pb.start();
+                    program.waitFor();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return;
+            }
+        }
+        System.out.println(commandNotFoundText(command));
+    }
+
+    private static void pwd() {
+        System.out.println(currentDir.getAbsolutePath());
+    }
+
+    private static void cd(String[] command) {
+        if (command.length >= 1) {
+            String target = command[0];
+            File targetDir;
+            
+            if (target.equals("~")) {
+                String home = System.getenv("HOME");
+                targetDir = (home != null) ? new File(home) : new File(System.getProperty("user.home"));
+            } else if (new File(target).isAbsolute()) {
+                targetDir = new File(target);
+            } else {
+                targetDir = new File(currentDir, target);
+            }
+            
+            try {
+                // Normalize the path to resolve . and .. components
+                Path normalizedPath = targetDir.toPath().toRealPath();
+                targetDir = normalizedPath.toFile();
+            } catch (IOException e) {
+                // If we can't normalize (path doesn't exist), use the original
+            }
+            
+            if (targetDir.exists() && targetDir.isDirectory()) {
+                currentDir = targetDir;
+                System.setProperty("user.dir", currentDir.getAbsolutePath());
+            } else {
+                System.out.println("cd: " + target + ": No such file or directory");
+            }
+        } else {
+            System.out.println("cd: missing argument");
+        }
+    }
+
+    private static void echo(String[] output) {
+        if (output.length > 0) {
+            System.out.println(String.join(" ", output));
+        } else {
+            System.out.println();
+        }
+    }
+
+    private static void cat(String[] files) {
+        for (String file : files) {
+            try {
+                Path filePath = Paths.get(file);
+                String content = Files.readString(filePath);
+                System.out.print(content);
+            } catch (IOException e) {
+                System.out.println("cat: " + file + ": No such file or directory");
+            }
+        }
     }
 }
 
 // git add .
-// git commit -m "Implement single-quote support for echo and arguments"
+// git commit -m "Fix shell parsing and implement builtins with correct quote/escape handling"
 // git push origin master
