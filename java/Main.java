@@ -1,6 +1,8 @@
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Scanner;
 import java.util.Set;
 
@@ -8,10 +10,8 @@ public class Main {
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
 
-        // Track current working directory
         File currentDir = new File(System.getProperty("user.dir"));
 
-        // Define builtins
         Set<String> builtins = new HashSet<>();
         builtins.add("echo");
         builtins.add("exit");
@@ -24,32 +24,35 @@ public class Main {
             String input = scanner.nextLine().trim();
             if (input.isEmpty()) continue;
 
-            String[] parts = input.split("\\s+");
-            String command = parts[0];
+            // Tokenize input, handling single and double quotes
+            List<String> parts = parseInput(input);
+            if (parts.isEmpty()) continue;
 
-            // Handle 'exit'
+            String command = parts.get(0);
+
+            // exit
             if (command.equals("exit")) {
                 int exitCode = 0;
-                if (parts.length > 1) {
-                    try { exitCode = Integer.parseInt(parts[1]); } 
+                if (parts.size() > 1) {
+                    try { exitCode = Integer.parseInt(parts.get(1)); } 
                     catch (NumberFormatException e) { exitCode = 0; }
                 }
                 System.exit(exitCode);
             }
 
-            // Handle 'echo'
+            // echo
             else if (command.equals("echo")) {
-                if (parts.length > 1) {
-                    System.out.println(String.join(" ", java.util.Arrays.copyOfRange(parts, 1, parts.length)));
+                if (parts.size() > 1) {
+                    System.out.println(String.join(" ", parts.subList(1, parts.size())));
                 } else {
                     System.out.println();
                 }
             }
 
-            // Handle 'type'
+            // type
             else if (command.equals("type")) {
-                if (parts.length > 1) {
-                    String cmdToCheck = parts[1];
+                if (parts.size() > 1) {
+                    String cmdToCheck = parts.get(1);
                     if (builtins.contains(cmdToCheck)) {
                         System.out.println(cmdToCheck + " is a shell builtin");
                     } else {
@@ -75,18 +78,17 @@ public class Main {
                 }
             }
 
-            // Handle 'pwd'
+            // pwd
             else if (command.equals("pwd")) {
                 System.out.println(currentDir.getAbsolutePath());
             }
 
-            // Handle 'cd' (absolute, relative, ~)
+            // cd
             else if (command.equals("cd")) {
-                if (parts.length > 1) {
-                    String target = parts[1];
+                if (parts.size() > 1) {
+                    String target = parts.get(1);
                     File targetDir;
 
-                    // Handle ~ as home directory
                     if (target.equals("~")) {
                         String home = System.getenv("HOME");
                         if (home != null && !home.isEmpty()) {
@@ -118,7 +120,7 @@ public class Main {
                 }
             }
 
-            // Handle external programs
+            // external programs
             else {
                 String pathEnv = System.getenv("PATH");
                 boolean found = false;
@@ -127,8 +129,7 @@ public class Main {
                     for (String dir : dirs) {
                         File file = new File(dir, command);
                         if (file.exists() && file.canExecute()) {
-                            String[] cmdWithArgs = parts;
-                            ProcessBuilder pb = new ProcessBuilder(cmdWithArgs);
+                            ProcessBuilder pb = new ProcessBuilder(parts);
                             pb.directory(currentDir);
                             pb.inheritIO();
                             try {
@@ -148,4 +149,45 @@ public class Main {
             }
         }
     }
+
+    // Parse input with single and double quote support
+    private static List<String> parseInput(String input) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (c == '\'' && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+                continue;
+            }
+
+            if (c == '\"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+                continue;
+            }
+
+            if (Character.isWhitespace(c) && !inSingleQuote && !inDoubleQuote) {
+                if (current.length() > 0) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(c);
+            }
+        }
+
+        if (current.length() > 0) {
+            tokens.add(current.toString());
+        }
+
+        return tokens;
+    }
 }
+
+// git add .
+// git commit -m "Implement double-quote support for echo and arguments"
+// git push origin master
