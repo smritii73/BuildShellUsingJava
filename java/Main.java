@@ -1,6 +1,19 @@
-import java.io.*;
-import java.nio.file.*;
-import java.util.*;
+import java.io.BufferedReader;
+import java.io.Closeable;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
+import java.io.PrintStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 public class Main {
 
@@ -26,14 +39,22 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
         boolean exit = false;
-        Scanner scanner = new Scanner(System.in);
         
         while (!exit) {
             System.out.print("$ ");
-            String input = scanner.nextLine().trim();
-            if (input.isEmpty()) continue;
-
-            // Add command to history
+            System.out.flush();
+            
+            String input = readLineWithHistory();
+            
+            if (input == null) {
+                break;
+            }
+            
+            if (input.trim().isEmpty()) continue;
+            
+            input = input.trim();
+            
+            // Add command to our history list
             commandHistory.add(input);
 
             // Check for pipeline
@@ -60,12 +81,130 @@ public class Main {
                     case TYPE -> type(arguments);
                     case PWD -> pwd();
                     case CD -> cd(arguments);
-                    case HISTORY -> history(arguments);
+                    case HISTORY -> {
+                        history(arguments);
+                    }
                     default -> nullCommand(parts);
                 }
             }
         }
-        scanner.close();
+        
+        System.out.println(); // Final newline before exit
+    }
+
+    private static String readLineWithHistory() throws IOException {
+        // Enable raw mode temporarily
+        String[] enableCmd = {"/bin/sh", "-c", "stty raw -echo < /dev/tty"};
+        try {
+            Runtime.getRuntime().exec(enableCmd).waitFor();
+        } catch (Exception e) {
+            // Fall back to simple readline if stty fails
+            return new BufferedReader(new InputStreamReader(System.in)).readLine();
+        }
+        
+        try {
+            StringBuilder line = new StringBuilder();
+            int historyIndex = commandHistory.size();
+            String savedLine = "";
+            
+            while (true) {
+                int c = System.in.read();
+                
+                if (c == -1) {
+                    return null;
+                }
+                
+                // Handle newline (Enter key)
+                if (c == '\n' || c == '\r') {
+                    System.out.print("\r\n");
+                    System.out.flush();
+                    return line.toString();
+                }
+                
+                // Handle backspace
+                if (c == 127 || c == 8) {
+                    if (line.length() > 0) {
+                        line.deleteCharAt(line.length() - 1);
+                        System.out.print("\b \b");
+                        System.out.flush();
+                    }
+                    continue;
+                }
+                
+                // Handle escape sequences (arrow keys)
+                if (c == 27) { // ESC
+                    int next1 = System.in.read();
+                    if (next1 == '[') {
+                        int next2 = System.in.read();
+                        
+                        if (next2 == 'A') { // Up arrow
+                            if (historyIndex > 0) {
+                                if (historyIndex == commandHistory.size()) {
+                                    savedLine = line.toString();
+                                }
+                                historyIndex--;
+                                clearLine(line.length());
+                                line.setLength(0);
+                                line.append(commandHistory.get(historyIndex));
+                                System.out.print(line);
+                                System.out.flush();
+                            }
+                        } else if (next2 == 'B') { // Down arrow
+                            if (historyIndex < commandHistory.size()) {
+                                historyIndex++;
+                                clearLine(line.length());
+                                line.setLength(0);
+                                if (historyIndex == commandHistory.size()) {
+                                    line.append(savedLine);
+                                } else {
+                                    line.append(commandHistory.get(historyIndex));
+                                }
+                                System.out.print(line);
+                                System.out.flush();
+                            }
+                        }
+                    }
+                    continue;
+                }
+                
+                // Handle Ctrl+C
+                if (c == 3) {
+                    System.out.print("^C\r\n");
+                    System.out.flush();
+                    return "";
+                }
+                
+                // Handle Ctrl+D
+                if (c == 4) {
+                    if (line.length() == 0) {
+                        return null;
+                    }
+                    continue;
+                }
+                
+                // Regular character
+                if (c >= 32 && c < 127) {
+                    line.append((char) c);
+                    System.out.print((char) c);
+                    System.out.flush();
+                }
+            }
+        } finally {
+            // Always restore terminal mode
+            String[] restoreCmd = {"/bin/sh", "-c", "stty sane < /dev/tty"};
+            try {
+                Runtime.getRuntime().exec(restoreCmd).waitFor();
+            } catch (Exception e) {
+                // Ignore
+            }
+        }
+    }
+    
+    private static void clearLine(int length) {
+        for (int i = 0; i < length; i++) {
+            System.out.print("\b \b");
+        }
+        System.out.flush();
     }
 
     private static void executePipeline(String input) throws IOException, InterruptedException {
@@ -245,6 +384,26 @@ public class Main {
                 out.println(currentDir.getAbsolutePath());
             }
             case HISTORY -> {
+                // Check for -r flag to read from file
+                if (args.length == 2 && "-r".equals(args[0])) {
+                    String filePath = args[1];
+                    try {
+                        Path path = Paths.get(filePath);
+                        List<String> lines = Files.readAllLines(path);
+                        
+                        // Append non-empty lines to command history
+                        for (String line : lines) {
+                            if (!line.trim().isEmpty()) {
+                                commandHistory.add(line);
+                            }
+                        }
+                    } catch (IOException e) {
+                        System.err.println("history: " + filePath + ": No such file or directory");
+                    }
+                    return;
+                }
+                
+                // Display history with optional limit
                 int limit = commandHistory.size();
                 if (args.length > 0) {
                     try {
@@ -487,6 +646,28 @@ public class Main {
     }
 
     private static void history(String[] args) {
+        // Check for -r flag to read from file
+        if (args.length == 2 && "-r".equals(args[0])) {
+            String filePath = args[1];
+            try {
+                Path path = Paths.get(filePath);
+                List<String> lines = Files.readAllLines(path);
+                
+                // Append non-empty lines to command history
+                for (String line : lines) {
+                    if (!line.trim().isEmpty()) {
+                        commandHistory.add(line);
+                    }
+                }
+                // Successfully read the file, no output needed
+                return; // Important: return here to not display history
+            } catch (IOException e) {
+                System.out.println("history: " + filePath + ": No such file or directory");
+                return; // Also return on error
+            }
+        }
+        
+        // Display history with optional limit
         int limit = commandHistory.size();
         if (args.length > 0) {
             try {
