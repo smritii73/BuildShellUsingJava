@@ -1,6 +1,19 @@
-import java.io.*;
-import java.nio.file.*;
-import java.util.*;
+import java.io.BufferedReader;
+import java.io.Closeable;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
+import java.io.PrintStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 public class Main {
 
@@ -68,7 +81,9 @@ public class Main {
                     case TYPE -> type(arguments);
                     case PWD -> pwd();
                     case CD -> cd(arguments);
-                    case HISTORY -> history(arguments);
+                    case HISTORY -> {
+                        history(arguments);
+                    }
                     default -> nullCommand(parts);
                 }
             }
@@ -369,6 +384,26 @@ public class Main {
                 out.println(currentDir.getAbsolutePath());
             }
             case HISTORY -> {
+                // Check for -r flag to read from file
+                if (args.length == 2 && "-r".equals(args[0])) {
+                    String filePath = args[1];
+                    try {
+                        Path path = Paths.get(filePath);
+                        List<String> lines = Files.readAllLines(path);
+                        
+                        // Append non-empty lines to command history
+                        for (String line : lines) {
+                            if (!line.trim().isEmpty()) {
+                                commandHistory.add(line);
+                            }
+                        }
+                    } catch (IOException e) {
+                        System.err.println("history: " + filePath + ": No such file or directory");
+                    }
+                    return;
+                }
+                
+                // Display history with optional limit
                 int limit = commandHistory.size();
                 if (args.length > 0) {
                     try {
@@ -611,6 +646,28 @@ public class Main {
     }
 
     private static void history(String[] args) {
+        // Check for -r flag to read from file
+        if (args.length == 2 && "-r".equals(args[0])) {
+            String filePath = args[1];
+            try {
+                Path path = Paths.get(filePath);
+                List<String> lines = Files.readAllLines(path);
+                
+                // Append non-empty lines to command history
+                for (String line : lines) {
+                    if (!line.trim().isEmpty()) {
+                        commandHistory.add(line);
+                    }
+                }
+                // Successfully read the file, no output needed
+                return; // Important: return here to not display history
+            } catch (IOException e) {
+                System.out.println("history: " + filePath + ": No such file or directory");
+                return; // Also return on error
+            }
+        }
+        
+        // Display history with optional limit
         int limit = commandHistory.size();
         if (args.length > 0) {
             try {
