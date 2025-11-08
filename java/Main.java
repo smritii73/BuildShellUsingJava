@@ -5,7 +5,7 @@ import java.util.*;
 public class Main {
 
     enum ShellType {
-        TYPE, ECHO, EXIT, PWD, CD, CAT, NONE
+        TYPE, ECHO, EXIT, PWD, CD, CAT, HISTORY, NONE
     }
 
     private static final Map<String, ShellType> builtins =
@@ -14,13 +14,15 @@ public class Main {
                     "echo", ShellType.ECHO,
                     "exit", ShellType.EXIT,
                     "pwd", ShellType.PWD,
-                    "cd", ShellType.CD);
+                    "cd", ShellType.CD,
+                    "history", ShellType.HISTORY);
     
     private static final Map<String, ShellType> externals = Map.of("cat", ShellType.CAT);
 
     private static final String PATH = System.getenv("PATH");
     private static final String[] DIRECTORIES = PATH != null ? PATH.split(File.pathSeparator) : new String[0];
     private static File currentDir = new File(System.getProperty("user.dir"));
+    private static final List<String> commandHistory = new ArrayList<>();
 
     public static void main(String[] args) throws Exception {
         boolean exit = false;
@@ -31,8 +33,9 @@ public class Main {
             String input = scanner.nextLine().trim();
             if (input.isEmpty()) continue;
 
-            // Tokenize input, handling single and double quotes
-            // Tokenize input, handling single quotes
+            // Add command to history
+            commandHistory.add(input);
+
             // Check for pipeline
             if (input.contains(" | ")) {
                 executePipeline(input);
@@ -57,6 +60,7 @@ public class Main {
                     case TYPE -> type(arguments);
                     case PWD -> pwd();
                     case CD -> cd(arguments);
+                    case HISTORY -> history(arguments);
                     default -> nullCommand(parts);
                 }
             }
@@ -159,25 +163,6 @@ public class Main {
                     threads.add(inputThread);
                 } else {
                     closeQuietly(process.getOutputStream());
-            List<String> parts = parseInput(input);
-            if (parts.isEmpty()) continue;
-
-            String command = parts.get(0);
-            String[] arguments = parts.subList(1, parts.size()).toArray(new String[0]);
-
-            if (externals.containsKey(command)) {
-                switch (externals.getOrDefault(command, ShellType.NONE)) {
-                    case CAT -> cat(arguments);
-                    default -> nullCommand(parts);
-                }
-            } else {
-                switch (builtins.getOrDefault(command, ShellType.NONE)) {
-                    case EXIT -> exit = true;
-                    case ECHO -> echo(arguments);
-                    case TYPE -> type(arguments);
-                    case PWD -> pwd();
-                    case CD -> cd(arguments);
-                    default -> nullCommand(parts);
                 }
                 
                 // Connect output
@@ -254,35 +239,24 @@ public class Main {
                             out.println(cmdToCheck + ": not found");
                         }
                     }
-        scanner.close();
-    }
-
-    private static List<String> parseInput(String input) {
-        List<String> result = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inSingle = false;
-        boolean inDouble = false;
-        boolean escape = false;
-
-        for (int i = 0; i < input.length(); i++) {
-            char c = input.charAt(i);
-
-            if (escape) {
-                if (inSingle) {
-                    current.append('\\').append(c);
-                } else if (inDouble) {
-                    switch (c) {
-                        case '$', '`', '"', '\\', '\n' -> current.append(c);
-                        default -> current.append('\\').append(c);
-                    }
-                } else {
-                    current.append(c);
                 }
-                escape = false;
-                continue;
             }
             case PWD -> {
                 out.println(currentDir.getAbsolutePath());
+            }
+            case HISTORY -> {
+                int limit = commandHistory.size();
+                if (args.length > 0) {
+                    try {
+                        limit = Integer.parseInt(args[0]);
+                    } catch (NumberFormatException e) {
+                        // Use default (all history)
+                    }
+                }
+                int start = Math.max(0, commandHistory.size() - limit);
+                for (int i = start; i < commandHistory.size(); i++) {
+                    out.printf("%5d  %s%n", i + 1, commandHistory.get(i));
+                }
             }
             case CAT -> {
                 // If no args, read from stdin
@@ -338,13 +312,9 @@ public class Main {
         }
     }
 
-    // Parse input with single and double quote support
-    // Parse input with single-quote support
     private static List<String> parseInput(String input) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
-        boolean inSingleQuote = false;
-        boolean inDoubleQuote = false;
         boolean inSingle = false;
         boolean inDouble = false;
         boolean escape = false;
@@ -352,20 +322,6 @@ public class Main {
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            if (c == '\'' && !inDoubleQuote) {
-                inSingleQuote = !inSingleQuote;
-                continue;
-            }
-
-            if (c == '\"' && !inSingleQuote) {
-                inDoubleQuote = !inDoubleQuote;
-                continue;
-            }
-
-            if (Character.isWhitespace(c) && !inSingleQuote && !inDoubleQuote) {
-            if (c == '\'') {
-                inSingleQuote = !inSingleQuote;
-                continue; // skip the quote itself
             if (escape) {
                 if (inSingle) {
                     current.append('\\').append(c);
@@ -380,22 +336,6 @@ public class Main {
                 escape = false;
                 continue;
             }
-
-            if (c == '\\') {
-                escape = true;
-                continue;
-            }
-
-            if (c == '\'' && !inDouble) {
-                inSingle = !inSingle;
-                continue;
-            }
-
-            if (c == '"' && !inSingle) {
-                inDouble = !inDouble;
-                continue;
-            }
-
 
             if (c == '\\') {
                 escape = true;
@@ -509,7 +449,6 @@ public class Main {
             }
             
             try {
-                // Normalize the path to resolve . and .. components
                 Path normalizedPath = targetDir.toPath().toRealPath();
                 targetDir = normalizedPath.toFile();
             } catch (IOException e) {
@@ -544,6 +483,21 @@ public class Main {
             } catch (IOException e) {
                 System.out.println("cat: " + file + ": No such file or directory");
             }
+        }
+    }
+
+    private static void history(String[] args) {
+        int limit = commandHistory.size();
+        if (args.length > 0) {
+            try {
+                limit = Integer.parseInt(args[0]);
+            } catch (NumberFormatException e) {
+                // Use default (all history)
+            }
+        }
+        int start = Math.max(0, commandHistory.size() - limit);
+        for (int i = start; i < commandHistory.size(); i++) {
+            System.out.printf("%5d  %s%n", i + 1, commandHistory.get(i));
         }
     }
 }
