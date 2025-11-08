@@ -8,9 +8,11 @@ import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -403,6 +405,21 @@ public class Main {
                     return;
                 }
                 
+                // Check for -w flag to write to file
+                if (args.length == 2 && "-w".equals(args[0])) {
+                    String filePath = args[1];
+                    try {
+                        Path path = Paths.get(filePath);
+                        // Write all commands to file with trailing newline
+                        Files.write(path, commandHistory, StandardCharsets.UTF_8,
+                                   StandardOpenOption.CREATE, 
+                                   StandardOpenOption.TRUNCATE_EXISTING);
+                    } catch (IOException e) {
+                        System.err.println("history: " + filePath + ": " + e.getMessage());
+                    }
+                    return;
+                }
+                
                 // Display history with optional limit
                 int limit = commandHistory.size();
                 if (args.length > 0) {
@@ -667,6 +684,23 @@ public class Main {
             }
         }
         
+        // Check for -w flag to write to file
+        if (args.length == 2 && "-w".equals(args[0])) {
+            String filePath = args[1];
+            try {
+                Path path = Paths.get(filePath);
+                // Write all commands to file with trailing newline
+                Files.write(path, commandHistory, StandardCharsets.UTF_8,
+                           StandardOpenOption.CREATE, 
+                           StandardOpenOption.TRUNCATE_EXISTING);
+                // Successfully wrote the file, no output needed
+                return;
+            } catch (IOException e) {
+                System.out.println("history: " + filePath + ": " + e.getMessage());
+                return;
+            }
+        }
+        
         // Display history with optional limit
         int limit = commandHistory.size();
         if (args.length > 0) {
@@ -683,7 +717,7 @@ public class Main {
     }
 }
 
-
+// git commit -m "Implement single-quote support for echo and arguments"
 // git add .
 // git commit -m "Add pipeline support for shell commands"
 // git push origin master
